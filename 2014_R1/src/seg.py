@@ -4,19 +4,21 @@
 
 import sys
 import re
+import pickle
 from pprint import *
 
 VERSION="0.1"
+WORD_MAP_DEPTH=6
 
-def make_model(filename):
+def char_model(filename):
   model = {}
   count = 0
 
   with open(filename) as infile:
     for line in infile:
-      for word in re.split("[^a-zA-Z]*", line):
+      for word in re.split("[^a-zA-Z0-9]*", line.lower()):
         node = model
-        for char in word.lower():
+        for char in word:
           if char in node:
             node = node[char]
           else:
@@ -26,10 +28,50 @@ def make_model(filename):
         count += 1
 
   del model['+']  
-  print "Total count = {}".format(count)
+  #print "Total count = {}".format(count)
   return model
 
-def query(model, str):
+def word_model(filename):
+  model = {}
+
+  with open(filename) as infile:
+    for line in infile:
+      node = model
+      words = re.split("[^a-zA-Z0-9]*", line.lower())
+      for index in xrange(0, len(words)):
+        l = words[index:index + WORD_MAP_DEPTH]
+        _word_model(model, l)
+
+  return model
+
+def _word_model(model, words):
+  node = model
+  for word in words:
+    if word == '':
+      continue
+    if word in node:
+      node = node[word]
+    else:
+      node[word] = {}
+      node = node[word]
+    if '+' in node:
+      node['+'] += 1
+    else:
+      node['+'] = 1
+
+def get_word_model_count(model, words):
+  node = model
+  for word in words:
+    if word in node:
+      node = node[word]
+    else:
+      return 0
+
+  if '+' in node:
+    return node['+']
+  return 0 
+
+def query_by_char(model, str):
   node = model
   str = str.lower()
   word = ''
@@ -63,10 +105,31 @@ def query(model, str):
   
   return result.strip()
 
-def word_tree(model, str):
+def query_by_word(cmodel, wmodel, str):
+  tree = word_tree(cmodel, wmodel, str)
+
+  value, result = search_max(tree, '+')
+  if result == '':
+    value, result = search_max(tree, '-')
+
+  return result
+
+def query(cmodel, wmodel, str):
+  result = query_by_word(cmodel, wmodel, str)
+  if result == '':
+    result = query_by_char(cmodel, str)
+
+  return result
+
+def word_tree(cmodel, wmodel, str):
   tree = {'': str}
-  _word_tree(model, tree)
-  return tree['']
+  _word_tree(cmodel, tree)
+  tree = tree['']
+
+  _word_tree_count(wmodel, tree, '')
+  _word_tree_count2(wmodel, tree, '', '')
+
+  return tree
 
 def _word_tree(model, tree):
   for key, value in tree.iteritems():
@@ -75,7 +138,6 @@ def _word_tree(model, tree):
 
     if value == '':
       continue
-
     for char in value:
       prefix += char
       if char in node:
@@ -83,15 +145,76 @@ def _word_tree(model, tree):
       else:
         node = {}
       if '+' in node:
-        if type(tree[key]) == type(''):
-          tree[key] = {prefix : value[len(prefix):]}
-        else:
-          tree[key][prefix] = value[len(prefix):]
+        if len(prefix) != 1 or prefix == 'a' or prefix == 'i':
+          t = value[len(prefix):]
+          if t == '':
+            t = {}
+          if type(tree[key]) == type(''):
+            tree[key] = {prefix : t}
+          else:
+            tree[key][prefix] = t
+   
+    if type(tree[key]) == type(''):
+      tree[key] = {prefix : {}}
     _word_tree(model, tree[key])
-    
-def query_check(model, str):
+
+def _word_tree_count(model, tree, str):
+  if tree == {}:
+    tree['+'] = get_word_model_count(model, str.strip().split())
+    return
+  for key, value in tree.iteritems():
+    _word_tree_count(model, value, str + ' ' + key)
+
+def  _word_tree_count2(model, tree, str, last):
+  if '+' in tree:
+    # Method 1
+    sum = 0
+    if len(last) != 1:
+      for word in str.strip().split():
+        sum += get_word_model_count(model, [word])
+    tree['-'] = sum
+
+    # Method 2
+    #tree['-'] = 100 / len(str.strip().split())
+
+    # Method 3
+    sum = 0
+    if len(last) != 1:
+      for word in str.strip().split():
+        count = get_word_model_count(model, [word])
+        sum += (count ** (len(word) / 30.0) / max((30.0 - len(word)), 1)) * len(word) 
+    tree['-'] = sum * (100 / len(str.strip().split()))
+
+    return
+
+  for key, value in tree.iteritems():
+    _word_tree_count2(model, value, str + ' ' + key, key)
+
+
+def search_max(tree, char):
+  max, max_str = _search_max(tree, '', char) 
+  return max, max_str.strip()
+
+def _search_max(tree, str, char):
+  max = 0
+  max_str = ''
+
+  for key, value in tree.iteritems():
+    if char in value:
+      if value[char] > max:
+        max = value[char]
+        max_str = str + ' ' + key
+    else:
+      m, s =_search_max(value, str + ' ' + key, char)
+      if m > max:
+        max = m
+        max_str = s
+
+  return max, max_str  
+
+def query_check(cmodel, wmodel, str):
   a = str.strip().split('\t')
-  b = query(model, a[0])
+  b = query(cmodel, wmodel, a[0])
   if b == a[1]:
     print "{} : {} : {} --> PASS".format(a[0], a[1], b)
     return True
@@ -99,13 +222,13 @@ def query_check(model, str):
     print "{} : {} : {} --> FAIL".format(a[0], a[1], b)
     return False
 
-def query_check_file(model, filename):
+def query_check_file(cmodel, wmodel, filename):
   pc = 0
   fc = 0
 
   with open(filename) as infile:
     for line in infile:
-      result = query_check(model, line) 
+      result = query_check(cmodel, wmodel, line) 
       if result:
         pc += 1
       else:
@@ -129,22 +252,51 @@ def prefix(model, str):
 if __name__ == '__main__':
   import argparse
   parser = argparse.ArgumentParser(version=VERSION)
-  parser.add_argument('--data', required=True, help='Training Data')
+  parser.add_argument('--data', help='Training Data')
+  parser.add_argument('--cmodel', help='Character Model Data')
+  parser.add_argument('--wmodel', help='Word Model Data')
   parser.add_argument('--query', help='Query Data')
   parser.add_argument('--prefix', help='Check mode with prefix')
   parser.add_argument('--tree', help='Show possible word tree')
+  parser.add_argument('--count', help='Show word model count')
+  parser.add_argument('--max', help='Search max value in wordtree')
+  parser.add_argument('--word', action='store_true', help='Show word analysis')
   args = parser.parse_args()
 
-  model = make_model(args.data)
+  if args.data:
+    cmodel = char_model(args.data)
+    wmodel = word_model(args.data)
+    pickle.dump(cmodel, open('cmodel.p', 'wb'))
+    pickle.dump(wmodel, open('wmodel.p', 'wb'))
+  else:
+    if args.cmodel:
+      cmodel = pickle.load(open(args.cmodel, 'rb'))
+    if args.wmodel:
+      wmodel = pickle.load(open(args.wmodel, 'rb'))
+
   if args.tree:
-    tree = word_tree(model, args.tree)
+    tree = word_tree(cmodel, wmodel, args.tree)
     pprint(tree)
     sys.exit(0)
   if args.prefix:
-    prefix(model, args.prefix)
+    prefix(cmodel, args.prefix)
+    sys.exit(0)
+  if args.count:
+    count = get_word_model_count(wmodel, args.count.split())
+    print count
+    sys.exit(0)
+  if args.max:
+    tree = word_tree(cmodel, wmodel, args.max)
+    count, str = search_max(tree)
+    print count, str
+    sys.exit(0)
+  if args.word:
+    for word in wmodel:
+      print "{}, {}, {}".format(word, len(word), get_word_model_count(wmodel, [word]))
     sys.exit(0)
   if args.query:
-    query_check_file(model, args.query)
+    query_check_file(cmodel, wmodel, args.query)
   else:
-    pprint(model)
- 
+    pprint(cmodel)
+    pprint(wmodel)
+    pass
