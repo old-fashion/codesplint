@@ -1,4 +1,55 @@
-SKP Code Splint Round 1
------------------------
 
+ SKP Code Splint 2014 Round 1
+-------------------------------------------------------------------------------- 
 
+Algorithm
+---------
+ 1. train.txt를 단어별로 잘라서 글자의 순서로 tree를 만듭니다. -> cmodel 
+ 2. train.txt를 문장 단위로 잘라서 단어의 순서로 tree를 만들고 등장 횟수를 기록합니다 -> wmodel
+ 3. wmodel을 traverse하여 글자 순서에 대한 결과의 mapping을 만듭니다 -> smodel
+ 4. 입력에 대하여 cmodel에 등록된 단어로 조합 가능한 word tree를 전개하여 wmodel 기반으로 
+    f(weight)가 가장 높은 path를 선택합니다.
+ 5. 성능을 높이기 위하여 word tree 전개시 이미 알고있는 글자 순서는 smodel에 기반 선치환합니다. 
+
+Reference
+---------
+ 없음
+
+Code
+----
+ 1. 프로그램에 function별 comment
+ 2. 코드 기능 추가 History로 코드 설명을 대체 합니다. (%는 train.qry에 대한 정답율)
+   #01 : train.txt를 cmodel로만 분석                                 57.31% 
+   #02 : cmodel에서 greedy 방식으로 단어 선택                        70.13%
+   #03 : wmodel 기반으로 word tree를 전개하여 그중 count max 선택    Timeout
+   #04 : word tree 전개시 1글자 단어 제외                            57.90%
+   #05 : wmodel + cmodel greedy 적용                                 81.16%
+   #06 : 'a', 'i' 예외 적용                                          82.37%
+   #07 : wmodel에 각 단어의 등장 횟수를 weight로 추가                64.38%
+   #08 : weight 변환 함수 적용                                       88.14%
+   #09 : train.qry를 wmodel과 cmodel에 적용                          98.15%
+   #10 : word tree 전개시 smodel기반 성능 개선 (67sec -> 9sec)       77.86%
+   #11 : smodel을 단어 길이 기반 선택 적용                           99.00%
+   * 코드에 history가 고스란히 남아있습니다.
+
+Execution Environment
+---------------------
+ - Linux (recommend Ubuntu 12.04 LTS)
+ - python 2.7.x
+ - bash shell
+ 
+
+Execution
+---------
+ - Learning : train.txt
+   # python seg.py --data train.txt 
+
+ - Learning : train.txt + train.qry
+   # cat train.qry | cut -f 2 >> train.txt
+   # python seg.py --data train.txt
+   
+ - Execution
+   # python --model model.marshal --test test.qry
+
+ - Execution @ multi-core
+   # run.sh test.qry test.ans.1
